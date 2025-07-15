@@ -17,12 +17,12 @@ def start_tray(on_exit_callback=None):
         # ปิดโปรแกรมจริง (หยุด main thread ด้วย)
         os._exit(0)  # ← หายจาก Task Manager ทันที
 
-    icon = Icon("MyTrayApp")
+    icon = Icon("Python Agent")
 
     icon_path = resource_path('Card-Reader-Api-Icon.ico')
     icon.icon = Image.open(icon_path)
 
-    icon.title = "My Tray App"
+    icon.title = "Python Agent"
     icon.menu = Menu(
         item("ออก", on_exit)
     )
