@@ -19,7 +19,7 @@ def start_tray(on_exit_callback=None):
 
     icon = Icon("MyTrayApp")
 
-    icon_path = resource_path('credit-card.ico')
+    icon_path = resource_path('Card-Reader-Api-Icon.ico')
     icon.icon = Image.open(icon_path)
 
     icon.title = "My Tray App"
