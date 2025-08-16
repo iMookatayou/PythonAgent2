@@ -1,4 +1,5 @@
-import time, codecs , subprocess
+import time, codecs , subprocess, os   # 👈 เพิ่ม import os ไว้ใช้ลบไฟล์ชั่วคราว
+
 # pyscard 2.0.7
 from smartcard.System import readers
 from smartcard.util import toHexString
@@ -26,7 +27,8 @@ class ThaiCIDHelper():
         self.ATR = ""
         self.showThaiDate = showThaiDate
         self.lastError = ""
-                
+        self.cardData = {}   # 👈 เพิ่มการกำหนดเริ่มต้นให้แน่ใจว่ามี cardData
+
         print(f'Reader: Available Count = {len(self.cardReaderList)}')
 
     def connectReader(self,index):
@@ -45,8 +47,6 @@ class ThaiCIDHelper():
         try: 
             # Create Connection
             self.cardReader = _HWcardReader.createConnection()
-            
-            # Reader Connection [OK]
             self.cardReader.connect()                 
             self.cardReaderIndex = index
             
@@ -58,18 +58,14 @@ class ThaiCIDHelper():
             print(f'Connection : Error = {err}')
         
         if _connected == True:
-            ### read ATR (format for storage cards)
             atr = self.cardReader.getATR()
             self.ATR = toHexString(atr)
             print(f"Reader: ATR = {self.ATR}")
-            
-            ### Check Version
             if (atr[0] == 0x3B & atr[1] == 0x67):
                 self.apduRequest = [0x00, 0xc0, 0x00, 0x01]
             else:
-                self.apduRequest = [0x00, 0xc0, 0x00, 0x00]        
-
-            return self.cardReader ,_connected 
+                self.apduRequest = [0x00, 0xc0, 0x00, 0x00]
+            return self.cardReader ,_connected
 
         return None, False
     
@@ -77,37 +73,25 @@ class ThaiCIDHelper():
                  saveText = SaveType.FILE,
                  savePhoto: SaveType = SaveType.FILE):
         """
-            readData อ่านข้อมูลจากบัตร ตาม apdu ที่กำหนด \n
-            พารามิเตอร์ : \n
-            readPhoto อ่านรูปภาพ ? \n
-            saveText บันทึกข้อความ ? None-File-Clip \n
-            savePhoto บันทึกข้อมูลภาพ ? None-File-Clip \n
+            readData อ่านข้อมูลจากบัตร ตาม apdu ที่กำหนด
         """
         start_time = time.time()
        
-        # เริ่มอ่านข้อมูลบัตร 
         data, sw1, sw2 = self.cardReader.transmit(self.apduSELECT + self.apduTHCard)
         print(f"Reader: Send `SELECT` Response = %02X %02X" % (sw1, sw2))
 
-        # จัดเก็บข้อมูลที่ได้จากการอ่านบัตร
         responseJson = []
         _jsonThaiDesc, _Json4Dev, _JsonRawData = {}, {}, {}
         _textThaiDesc, _textJson = "", ""
 
-        ##- -----------------------------------------------------
-        ### Read Value
         print("Reader: อ่านข้อมูล เริ่มแล้ว...")
         apduCount = len(APDU_DATA)
         for index, data in enumerate(APDU_DATA):
             _apdu = searchDATAValue('key', data['key'], 'apdu')
             print('Reader: อ่าน ', data['desc'])
             response = self.getValue(_apdu, data['type'])
-
-            # make Json
             _jsonThaiDesc[data['desc']] = response[0]
             _Json4Dev[data['id']] = response[0]
-
-            # make Text
             if index == (apduCount - 1):
                 _textThaiDesc += f'"{index}":"{data["desc"]}={response[0]}"\n'
                 _textJson += f'"{data["id"]}":"{response[0]}"\n'
@@ -115,7 +99,6 @@ class ThaiCIDHelper():
                 _textThaiDesc += f'"{index}":"{data["desc"]}={response[0]}",\n'
                 _textJson += f'"{data["id"]}":"{response[0]}",\n'
 
-        # เก็บข้อมูลลงใน cardData
         self.cardData = {
             'CID': _Json4Dev.get('CID'),
             'FULLNAME-TH': _Json4Dev.get('FULLNAME-TH'),
@@ -129,36 +112,37 @@ class ThaiCIDHelper():
             'DOCNO': _Json4Dev.get('DOCNO'),
         }
 
-        ### make Json List
         responseJson.append(_jsonThaiDesc)
         responseJson.append(_Json4Dev)
 
-        # Save to clipboard or file if needed...
         if saveText == SaveType.CLIPBOARD:
             print("Reader: บันทึกข้อมูลข้อความ [ไปคลิปบอร์ด] ...")
             copyTextToClipboard(f'{_textThaiDesc}\n{_textJson}')
 
-        ##- -----------------------------------------------------
-        ### Read Photo
         if readPhoto:
             print("Reader: อ่าน  รูปภาพ...")
-            photoStr = []
+            photoBytes = bytearray()
             for data in APDU_PHOTO:
                 _apdu = searchAPDUPhoto(data['key'])
-                photoStr += self.getPhoto(_apdu)
+                photoBytes += bytearray(self.getPhoto(_apdu))
 
-            ## Copy Photo to Clipboard
+            self.cardData['PHOTO'] = bytes(photoBytes)
+
             if savePhoto == SaveType.CLIPBOARD:
                 print("Reader: บันทึกข้อมูลรูป [ไปคลิปบอร์ด] ...")
-                copyImageToClipboard(filename)
+              
+                temp_filename = "temp_photo.jpg" 
+                with open(temp_filename, "wb") as f: 
+                    f.write(self.cardData['PHOTO'])
+                copyImageToClipboard(temp_filename) 
+                os.remove(temp_filename)
 
-        ##- -----------------------------------------------------
         end_time = time.time()
         elapsed_time = end_time - start_time
         elapsed_str = time.strftime("%S.{}".format(str(elapsed_time % 1)[2:])[:6], time.gmtime(elapsed_time))
-
         print(f"Reader: อ่านข้อมูล เสร็จแล้ว... [{elapsed_str} ms]")
-        
+
+    # … ส่วนอื่น ๆ (getValue, getPhoto, encodeTextThai, textToThaiDate, ฯลฯ) ไม่ได้แก้ไข …
 
 ####- --------------------------------------------------    
 #### getValue
@@ -292,8 +276,6 @@ def searchDATAValue(type,value,response):
 
     return None
 
-
-
 def searchAPDUPhoto(value):
     
     for data in APDU_PHOTO:
@@ -301,8 +283,6 @@ def searchAPDUPhoto(value):
            return data['apdu']
 
     return None
-
-
 
 def copyTextToClipboard(txt):
 
